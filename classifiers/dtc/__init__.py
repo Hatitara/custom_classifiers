@@ -146,6 +146,9 @@ class DecisionTreeClassifier:
             return self._traverse_tree(x, node.right)
         return None
 
+    def score(self, X: np.ndarray, y: np.ndarray) -> float:
+        return np.mean(self.predict(X) == y)
+
     def summary(self, X_test: np.ndarray, y_test: np.ndarray, target_names: Optional[np.ndarray] = None) -> pd.DataFrame:
         '''
         Generate a summary report for the decision tree classifier's performance on test data.
