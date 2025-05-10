@@ -40,7 +40,7 @@ class DecisionTreeClassifier:
     '''
     def __init__(self, min_samples_split: int = 2, max_depth: Optional[int] = None,
                  criterion: str = 'gini', categorical_threshold: int = 10,
-                 min_impurity_decrease: float = 0):
+                 min_impurity_decrease: float = 0, min_in_category: int = 0):
         """
         Initialize the Decision Tree Classifier.
 
@@ -56,6 +56,7 @@ class DecisionTreeClassifier:
         self.criterion = criterion
         self.categorical_threshold = categorical_threshold
         self.min_impurity_decrease = min_impurity_decrease
+        self.min_in_category = min_in_category
         self.root: Optional[Node] = None
         self.target_names: Optional[np.ndarray] = None
 
@@ -78,7 +79,8 @@ class DecisionTreeClassifier:
             leaf_value = np.argmax(np.bincount(y))
             return Node(value=leaf_value)
 
-        best_feature, best_threshold, left_indices, right_indices = best_split(X, y, self.criterion)
+        best_feature, best_threshold, left_indices, right_indices = best_split(X, y, self.criterion, self.categorical_threshold,
+                                                                                 self.min_in_category)
 
         if best_feature is None:
             leaf_value = np.argmax(np.bincount(y))

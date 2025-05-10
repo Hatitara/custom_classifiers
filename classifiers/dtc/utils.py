@@ -1,9 +1,9 @@
 '''
 Utility functions for Decision Tree Classifier.
 '''
-from itertools import combinations
-from typing import List, Tuple, Optional, Union
+from typing import List, Optional, Union
 import numpy as np
+import pandas as pd
 
 def is_categorical(X: np.ndarray, feature_index: int, threshold: int = 10) -> bool:
     """
@@ -102,67 +102,130 @@ def split(X, y, feature_index, threshold):
     X_right, y_right = X[right_indices], y[right_indices]
     return left_indices, right_indices, X_left, y_left, X_right, y_right
 
-def categorical_split(X: np.ndarray, y: np.ndarray, feature_index: int, criterion: str = 'gini') -> Tuple[Optional[List[int]], Optional[List[int]], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+def categorical_split(X, y, feature_idx, criterion='gini', min_samples=0):
     """
-    Split the dataset based on a categorical feature to maximize information gain.
+    Perform an optimal binary split on a categorical feature.
 
-    Args:
-        X (np.ndarray): The feature matrix.
-        y (np.ndarray): The target labels.
-        feature_index (int): The index of the categorical feature to split on.
-        criterion (str, optional): The impurity criterion to use ('gini' or 'entropy'). Defaults to 'gini'.
+    Parameters:
+    - X: 2D numpy array of shape (n_samples, n_features).
+    - y: 1D numpy array of class labels (length n_samples).
+    - feature_idx: integer index of the feature column to split on.
+    - criterion: 'gini' or 'entropy' (impurity measure).
+    - min_samples: threshold for grouping rare categories.
+        * If >=1: absolute count threshold;
+        * If between 0 and 1: fraction of total samples;
+        * If <=0: no grouping (default 0).
 
     Returns:
-        Tuple[Optional[List[int]], Optional[List[int]], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
-            Indices of left samples, indices of right samples, left features, left labels, right features, right labels.
-            Returns None for all if no beneficial split is found.
+    - left_idx: array of row indices sent to left child.
+    - right_idx: array of row indices sent to right child.
+    - X_left, X_right: feature subsets (rows) for left/right.
+    - y_left, y_right: label subsets for left/right.
     """
-    best_gain = -1.0
-    best_left_categories = None
-    left_indices_best = None
-    right_indices_best = None
+    X = np.asarray(X)
+    y = np.asarray(y)
+    n_samples, n_features = X.shape
 
-    n_samples = X.shape[0]
-    unique_categories = np.unique(X[:, feature_index])
-    if len(unique_categories) <= 1:
-        return None, None, None, None, None, None
+    # Basic checks
+    if n_samples != len(y):
+        raise ValueError(f"X and y must have same number of samples, got {n_samples} and {len(y)}")
+    if feature_idx < 0 or feature_idx >= n_features:
+        raise IndexError(f"Feature index {feature_idx} is out of bounds")
+    if criterion not in ('gini', 'entropy'):
+        raise ValueError("criterion must be 'gini' or 'entropy'")
 
-    parent_impurity = gini(y) if criterion == 'gini' else entropy(y)
+    # Extract and (optionally) copy feature column
+    col = X[:, feature_idx]
+    col2 = col.astype(str)
+    col2 = np.where(pd.isnull(col), 'MISSING', col).astype(str)
 
-    for r in range(1, len(unique_categories)):
-        for left_categories in combinations(unique_categories, r):
-            left_categories_set = set(left_categories)
-            right_categories_set = set(unique_categories) - left_categories_set
+    # Group rare categories into 'OTHER'
+    if min_samples is not None and min_samples > 0:
+        if min_samples < 1:
+            thresh = min_samples * n_samples
+        else:
+            thresh = min_samples
+        cats, counts = np.unique(col2, return_counts=True)
+        rare_cats = cats[counts < thresh]
+        if len(rare_cats) > 0:
+            for rc in rare_cats:
+                col2[col2 == rc] = 'OTHER'
 
-            left_indices = np.where(np.isin(X[:, feature_index], list(left_categories_set)))[0]
-            right_indices = np.where(np.isin(X[:, feature_index], list(right_categories_set)))[0]
+    # Unique categories after grouping
+    categories, counts = np.unique(col2, return_counts=True)
+    L = len(categories)
+    # If <2 categories, no split possible
+    if L <= 1:
+        left_idx = np.arange(n_samples)
+        right_idx = np.array([], dtype=int)
+        return left_idx, right_idx, X[left_idx], X[right_idx], y[left_idx], y[right_idx]
 
-            if len(left_indices) > 0 and len(right_indices) > 0:
-                left_y = y[left_indices]
-                right_y = y[right_indices]
-                n_left = len(left_indices)
-                n_right = len(right_indices)
+    # Map classes to indices
+    classes, _ = np.unique(y, return_counts=True)
+    K = len(classes)
+    class_to_idx = {c:i for i,c in enumerate(classes)}
 
-                child_impurity = (n_left / n_samples) * (gini(left_y) if criterion == 'gini' else entropy(left_y)) + \
-                                 (n_right / n_samples) * (gini(right_y) if criterion == 'gini' else entropy(right_y))
-                information_gain = parent_impurity - child_impurity
+    # Count matrix: shape (L categories) x (K classes)
+    cat_to_idx = {cat:i for i,cat in enumerate(categories)}
+    count_matrix = np.zeros((L, K), dtype=int)
+    for i in range(n_samples):
+        cat = col2[i]
+        cl = y[i]
+        j = cat_to_idx[cat]
+        k = class_to_idx[cl]
+        count_matrix[j, k] += 1
 
-                if information_gain > best_gain:
-                    best_gain = information_gain
-                    best_left_categories = list(left_categories_set)
-                    left_indices_best = left_indices
-                    right_indices_best = right_indices
+    imp_func = gini if criterion == 'gini' else entropy
 
-    if best_left_categories is not None:
-        left_X = X[left_indices_best]
-        left_y = y[left_indices_best]
-        right_X = X[right_indices_best]
-        right_y = y[right_indices_best]
-        return left_indices_best, right_indices_best, left_X, left_y, right_X, right_y
+    best_impurity = np.inf
+    best_splt = None
+
+    if K == 2:
+        probs = count_matrix[:,1] / count_matrix.sum(axis=1)
+        sorted_idx = np.argsort(probs)
+        sorted_counts = count_matrix[sorted_idx]
+        cum_counts = np.cumsum(sorted_counts, axis=0)
+        for i in range(1, L):  # split after i-1 vs rest
+            left_counts = cum_counts[i-1]
+            right_counts = cum_counts[-1] - left_counts
+            imp = ((left_counts.sum() * imp_func(left_counts)) +
+                   (right_counts.sum() * imp_func(right_counts))) / n_samples
+            if imp < best_impurity:
+                best_impurity = imp
+                best_splt = (None, i, sorted_idx)
+
     else:
-        return None, None, None, None, None, None
+        for ci in range(K):
+            prob_ci = count_matrix[:, ci] / count_matrix.sum(axis=1)
+            sorted_idx = np.argsort(prob_ci)
+            sorted_counts = count_matrix[sorted_idx]
+            cum_counts = np.cumsum(sorted_counts, axis=0)
+            for i in range(1, L):
+                left_counts = cum_counts[i-1]
+                right_counts = cum_counts[-1] - left_counts
+                imp = ((left_counts.sum() * imp_func(left_counts)) +
+                       (right_counts.sum() * imp_func(right_counts))) / n_samples
+                if imp < best_impurity:
+                    best_impurity = imp
+                    best_splt = (ci, i, sorted_idx)
 
-def best_split(X: np.ndarray, y: np.ndarray, criterion: str = 'gini', cthreshold: int = 10) -> tuple[Optional[int], Optional[Union[float, List]], Optional[np.ndarray], Optional[np.ndarray]]:
+    if best_splt is None:
+        left_idx = np.arange(n_samples)
+        right_idx = np.array([], dtype=int)
+        return left_idx, right_idx, X[left_idx], X[right_idx], y[left_idx], y[right_idx]
+
+    _, split_pos, sorted_idx = best_splt
+    sorted_cats = [categories[j] for j in sorted_idx]
+    left_cats = set(sorted_cats[:split_pos])
+    mask_left = np.array([val in left_cats for val in col2], dtype=bool)
+    left_idx = np.nonzero(mask_left)[0]
+    right_idx = np.nonzero(~mask_left)[0]
+
+    X_left, X_right = X[left_idx], X[right_idx]
+    y_left, y_right = y[left_idx], y[right_idx]
+    return left_idx, right_idx, X_left, y_left, X_right, y_right
+
+def best_split(X: np.ndarray, y: np.ndarray, criterion: str = 'gini', cthreshold: int = 10, min_samples: int = 0) -> tuple[Optional[int], Optional[Union[float, List]], Optional[np.ndarray], Optional[np.ndarray]]:
     """
     Find the best split by iterating over all features.
 
@@ -192,7 +255,7 @@ def best_split(X: np.ndarray, y: np.ndarray, criterion: str = 'gini', cthreshold
 
     for feature_index in range(n_features):
         if is_categorical(X, feature_index, cthreshold):
-            (left_indices, right_indices, _, y_left, _, y_right) = categorical_split(X, y, feature_index, criterion)
+            (left_indices, right_indices, _, y_left, _, y_right) = categorical_split(X, y, feature_index, criterion, min_samples)
             if left_indices is not None and right_indices is not None:
                 n_left, n_right = len(left_indices), len(right_indices)
                 child_impurity = (n_left / n_samples) * (gini(y_left) if criterion == 'gini' else entropy(y_left)) + \
@@ -206,7 +269,8 @@ def best_split(X: np.ndarray, y: np.ndarray, criterion: str = 'gini', cthreshold
                     left_indices_best = left_indices
                     right_indices_best = right_indices
         else:
-            thresholds = np.unique(X[:, feature_index])
+            values = np.unique(X[:, feature_index])
+            thresholds = (values[:-1] + values[1:]) / 2 
             for threshold in thresholds:
                 left_indices, right_indices, _, y_left, _, y_right = split(X, y, feature_index, threshold)
                 if len(y_left) > 0 and len(y_right) > 0:
