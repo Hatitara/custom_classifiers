@@ -1,9 +1,6 @@
 # Ignore all __pycache__ directories
 **/__pycache__/
 
-# Uncomment the line below for case-insensitive matching (requires Git 2.18+ and core.ignoreCase config)
-[Tt][Ee][Ss][Tt]*.ipynb
-
 # Ignore virtual environment folders named venv or .venv anywhere
 **/venv/
 **/.venv/
